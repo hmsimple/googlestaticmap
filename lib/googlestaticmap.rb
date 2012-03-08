@@ -98,7 +98,7 @@ class GoogleStaticMap
   # * terrain
   # * hybrid - satellite imagery with roads
   attr_accessor :maptype
-  
+
   # If you need to use a proxy server to reach Google, set the name/address
   # of the proxy server here
   attr_accessor :proxy_address
@@ -111,7 +111,7 @@ class GoogleStaticMap
     defaults = {:width => 500, :height => 350, :markers => [],
                 :sensor => false, :maptype => "roadmap", :paths => [],
                 :proxy_port => nil, :proxy_address => nil,}
-                
+
     attributes = defaults.merge(attrs)
     attributes.each {|k,v| self.send("#{k}=".to_sym,v)}
   end
@@ -123,7 +123,7 @@ class GoogleStaticMap
     unless @center || @markers.length > 0 || @paths.length > 0
       raise Exception.new("Need to specify either a center, markers, or a path")
     end
-    u = "http://maps.google.com/maps/api/staticmap?"
+    u = "https://maps.googleapis.com/maps/api/staticmap?"
     attrs = GoogleStaticMapHelpers.safe_instance_variables(self,
               ["markers", "paths", "width", "height", "center",
                "proxy_address", "proxy_port"],
@@ -138,27 +138,7 @@ class GoogleStaticMap
   # Returns the URL to retrieve the map, relative to http://maps.google.com
   # Example - "/maps/api/staticmap?params..."
   def relative_url
-    url.gsub(/http\:\/\/maps\.google\.com/, "")
-  end
-
-  # Connects to Google, retrieves the map, and returns the bytes for the image.
-  # Optionally, pass it an output name and the contents will get written to
-  # this file name
-  def get_map(output_file=nil)
-    http = Net::HTTP.Proxy(@proxy_address,@proxy_port).new("maps.google.com", 80)
-    resp, data = http.get2(relative_url)
-    if resp && resp.is_a?(Net::HTTPSuccess)
-      if output_file
-        File.open(output_file, "wb") {|f| f << data }
-      end
-      data
-    else
-      if resp
-        raise Exception.new("Error encountered while retrieving google map, code #{resp.code}, text #{resp.body}")
-      else
-        raise Exception.new("Error while retrieve google map, no response")
-      end
-    end
+    url.gsub(/https\:\/\/maps\.googleapis\.com/, "")
   end
 end
 
