@@ -1,54 +1,12 @@
-# = googlestaticmap gem
-#
-# This gem is on Gemcutter, simply type "gem install googlestaticmap" to install it.
-#
-# Available on github at http://github.com/brentsowers1/googlestaticmap
-#
-# Class for generating URLs for and downloading static maps from the Google Maps
-# Static API service.  GoogleStaticMap is the main class to use, instantiate it,
-# set the attributes to what you want, and call full_url on the instance to get
-# the URL to download the map from.  You can also call get_map to actually
-# download the map from Google, return the bytes, and optionally write the
-# image to a file.
-#
-# Examples:
-#
-# Get a simple static map centered at Washington, DC, with the default size
-# (500 x 350), zoomed to level 11
-#   map = GoogleStaticMap.new(:zoom => 11, :center => MapLocation.new(:address => "Washington, DC"))
-#   image = map.get_map
-#
-# Get a map with blue markers at the White House and the Supreme Court, zoomed
-# the closest that the map can be with both markers visible, at the default
-# size.
-#   map = GoogleStaticMap.new
-#   map.markers << MapMarker.new(:color => "blue", :location => MapLocation.new(:address => "1600 Pennsylvania Ave., Washington, DC"))
-#   map.markers << MapMarker.new(:color => "blue", :location => MapLocation.new(:address => "1 1st Street Northeast, Washington, DC"))
-#   image = map.get_map
-#
-# Get a GIF satellite map, with a size of 640 x 480, with a
-# semi transparent green box drawn around a set of 4 coordinates, with the box
-# outline solid, centered at the middle of the box, written out to the file
-# map.gif:
-#   map = GoogleStaticMap.new(:maptype => "satellite", :format => "gif", :width => 640, :height => 480)
-#   poly = MapPolygon.new(:color => "0x00FF00FF", :fillcolor => "0x00FF0060")
-#   poly.points << MapLocation.new(:latitude => 38.8, :longitude => -77.5)
-#   poly.points << MapLocation.new(:latitude => 38.8, :longitude => -76.9)
-#   poly.points << MapLocation.new(:latitude => 39.2, :longitude => -76.9)
-#   poly.points << MapLocation.new(:latitude => 39.2, :longitude => -77.5)
-#   poly.points << MapLocation.new(:latitude => 38.8, :longitude => -77.5)
-#   map.paths << poly
-#   map.get_map("map.gif")
-#
-# If you're working behind a proxy, create the map object this way:
-# map = GoogleStaticMap.new(:proxy_address=>'my.proxy.host', :proxy_port=>8080, :width => 640, :height => 480)
-#
-# Author:: Brent Sowers (mailto:brent@coordinatecommons.com)
-# License:: You're free to do whatever you want with this
+# Main file for the googlestaticmap gem.  See README.md for a full desciption with examples, licensing, contact
+# info, etc.
 
 require 'cgi'
 require 'net/http'
+require 'net/https' if RUBY_VERSION < "1.9"
 require File.dirname(__FILE__) +  '/googlestaticmap_helper'
+
+MAP_SEPARATOR = CGI.escape("|")
 
 # Main class for creating a static map.  Create an instance, Set attributes
 # that describe properties of the map.  Then call url to get a URL that you
@@ -106,11 +64,26 @@ class GoogleStaticMap
   # If proxy_address is set, set this to the port of the proxy server
   attr_accessor :proxy_port
 
+  # API Key - see https://developers.google.com/maps/documentation/staticmaps/#api_key for details
+  # Note that if this is set, the client ID and private key will be ignored if set
+  attr_accessor :api_key
+
+  # ClientId/PrivateKey for business customers -
+  # see https://developers.google.com/maps/documentation/business/webservices/auth#generating_valid_signatures for details
+  # These will be ignored if api_key is set
+  attr_accessor :client_id
+  attr_accessor :private_key
+
+  # Channel - identifier channel for tracking API source in enterprise tools
+  #           see https://developers.google.com/maps/documentation/business/clientside/quota for details
+  attr_accessor :channel
+
   # Takes an optional hash of attributes
   def initialize(attrs={})
     defaults = {:width => 500, :height => 350, :markers => [],
                 :sensor => false, :maptype => "roadmap", :paths => [],
-                :proxy_port => nil, :proxy_address => nil,}
+                :proxy_port => nil, :proxy_address => nil, :api_key => nil,
+                :client_id => nil, :private_key => nil}
 
     attributes = defaults.merge(attrs)
     attributes.each {|k,v| self.send("#{k}=".to_sym,v)}
@@ -118,28 +91,75 @@ class GoogleStaticMap
 
   # Returns the full URL to retrieve this static map.  You can use this as the
   # src for an img to display an image directly on a web page
-  # Example - "http://maps.google.com/maps/api/staticmap?params..."
-  def url
+  # Example - "http://maps.googleapis.com/maps/api/staticmap?params..."
+  # +protocol+ can be 'http', 'https' or :auto. Specifying :auto will not return
+  #   a protocol in the URL ("//maps.googleapis.com/..."), allowing the browser to
+  #   select the appropriate protocol (if the page is loaded with https, it will
+  #   use https). Defaults to http
+  def url(protocol='http')
     unless @center || @markers.length > 0 || @paths.length > 0
       raise Exception.new("Need to specify either a center, markers, or a path")
     end
-    u = "https://maps.googleapis.com/maps/api/staticmap?"
+    protocol = 'http' unless protocol == 'http' || protocol == 'https' ||
+                             protocol == :auto
+    protocol = protocol == :auto ? '' : protocol + ":"
+    base = "#{protocol}//maps.googleapis.com"
+    path = "/maps/api/staticmap?"
     attrs = GoogleStaticMapHelpers.safe_instance_variables(self,
               ["markers", "paths", "width", "height", "center",
-               "proxy_address", "proxy_port"],
-              :cgi_escape_values => true).to_a.sort
+               "proxy_address", "proxy_port", "api_key", "client_id",
+               "private_key"],
+              :cgi_escape_values => true).to_a
     attrs << ["size", "#{@width}x#{@height}"] if @width && @height
-    markers.each {|m| attrs << ["markers",m.to_s] }
-    paths.each {|p| attrs << ["path",p.to_s] }
-    attrs << ["center", center.to_s] if !center.nil?
-    u << attrs.collect {|attr| "#{attr[0]}=#{attr[1]}"}.join("&")
+    @markers.each {|m| attrs << ["markers",m.to_s] }
+    @paths.each {|p| attrs << ["path",p.to_s] }
+    attrs << ["center", @center.to_s] if !@center.nil?
+    attrs << ["key", @api_key] if !@api_key.nil?
+    attrs << ["client", @client_id] if @api_key.nil? && !@client_id.nil? && !@private_key.nil?
+    path << attrs.sort_by {|k,v| k}.collect {|attr| "#{attr[0]}=#{attr[1]}"}.join("&")
+    if @api_key.nil? && !@client_id.nil? && !@private_key.nil?
+      signature = GoogleStaticMapHelpers.sign(path, @private_key)
+      path << "&signature=" << signature
+    end
+    base + path
   end
 
-  # Returns the URL to retrieve the map, relative to http://maps.google.com
+  # Returns the URL to retrieve the map, relative to http://maps.googleapis.com
   # Example - "/maps/api/staticmap?params..."
-  def relative_url
-    url.gsub(/https\:\/\/maps\.googleapis\.com/, "")
+  def relative_url(protocol='http')
+    url(protocol).gsub(/[^\/]*\/\/maps\.googleapis\.com/, "")
   end
+
+
+  # Connects to Google, retrieves the map, and returns the bytes for the image.
+  # Optionally, pass it an output name and the contents will get written to
+  # this file name
+  # +output_file+ - optionally give the name of a file to write the output to.
+  #                 Pass nil to not write the output to a file
+  # +protocol+ - specify http or https here for the protocol to retrieve the
+  #              map with. Defaults to http
+  # return value - the binary data for the map
+  def get_map(output_file=nil, protocol='http')
+    protocol = 'http' unless protocol == 'http' || protocol == 'https'
+    port = protocol == 'https' ? 443 : 80
+    http = Net::HTTP.Proxy(@proxy_address,@proxy_port).new("maps.googleapis.com", port)
+    http.use_ssl = protocol == 'https'
+
+    resp = http.get2(relative_url(protocol))
+    if resp && resp.is_a?(Net::HTTPSuccess)
+      if output_file
+        File.open(output_file, "wb") {|f| f << resp.body }
+      end
+      resp.body
+    else
+      if resp
+        raise Exception.new("Error encountered while retrieving google map, code #{resp.code}, text #{resp.body}")
+      else
+        raise Exception.new("Error while retrieve google map, no response")
+      end
+    end
+  end
+
 end
 
 # Container class for a location on the map.  Set either a latitude and
@@ -204,12 +224,12 @@ class MapMarker
   def to_s
     raise Exception.new("Need a location for the marker") unless @location && @location.is_a?(MapLocation)
     attrs = GoogleStaticMapHelpers.safe_instance_variables(self, ["location"])
-    s = attrs.to_a.collect do |k|
+    s = attrs.to_a.sort_by {|x| x[0]}.collect do |k|
       # If the icon URL is URL encoded, it won't work
       val = (k[0] == "icon" ? k[1] : CGI.escape(k[1].to_s))
       "#{k[0]}:#{val}"
-    end.join("|")
-    s << "|#{@location.to_s}"
+    end.join(MAP_SEPARATOR)
+    s << MAP_SEPARATOR << @location.to_s
   end
 end
 
@@ -238,8 +258,8 @@ class MapPath
   def to_s
     raise Exception.new("Need more than one point for the path") unless @points && @points.length > 1
     attrs = GoogleStaticMapHelpers.safe_instance_variables(self, ["points"])
-    s = attrs.to_a.collect {|k| "#{k[0]}:#{CGI.escape(k[1].to_s)}"}.join("|")
-    s << "|" << @points.join("|")
+    s = attrs.to_a.sort_by {|x| x[0]}.collect {|k| "#{k[0]}:#{CGI.escape(k[1].to_s)}"}.join(MAP_SEPARATOR)
+    s << MAP_SEPARATOR << @points.join(MAP_SEPARATOR)
   end
 end
 

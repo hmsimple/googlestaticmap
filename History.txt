@@ -2,6 +2,32 @@ This fork:
 * Use the new Google Maps API URL over HTTPS.
 * Remove get_map (which didn't work).
 
+===
+
+== 1.2.2 / 2014-03-08
+* Added channel parameter for tracking (thanks dfenniak!)
+
+== 1.2.1 / 2014-03-03
+* Fixed bug in the signature generation for business customers from 1.2.0 (thanks nathany!)
+
+== 1.2.0 / 2014-03-03
+* Added support for setting an API key for monitoring, and a client ID/private key for business customers (thanks forrest!)
+* Changed to use maps.googleapis.com instead of maps.google.com (thanks nathany!)
+* Explicitly added MIT licensing
+
+== 1.1.4 / 2013-07-04
+* Properly URL encoding the URLs, caused an issue when using URI.parse on generated URLs (thanks nathany!)
+
+=== 1.1.3 / 2012-07-08
+* Fixed a Ruby 1.9.3 compatibility issue (thanks dusanb!)
+* Fixed a Ruby 1.8.7 compatibility issue introduced in 1.1.1
+
+=== 1.1.2 / 2012-04-27
+* Fixed bug from 1.1.1 when specifying https when calling get_map (thanks aduncan for catching it!)
+
+=== 1.1.1 / 2012-04-22
+* Added support for specifying the protocol to use (thanks andruby!)
+
 === 1.1.0 / 2011-10-18
 * Added an option to make requests through a proxy server (thanks bardsley!)
 
